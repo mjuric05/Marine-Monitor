@@ -46,15 +46,24 @@ body {
   min-height: 100vh;
 }
 
-.panel {
-  background: linear-gradient(180deg, var(--panel), var(--panel2));
-  border: 1px solid var(--line);
-  border-radius: 14px;
-}
+@layer components {
+  .panel {
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    /* Svaki panel je ručno promjenjive veličine (drag za donji desni kut);
+     * @layer components osigurava da specifični overflow-hidden (npr. na
+     * tablici sesija) i dalje pobjeđuje preko Tailwind utility klasa. */
+    resize: both;
+    overflow: auto;
+    min-width: 180px;
+    min-height: 96px;
+  }
 
-.panel-glow {
-  box-shadow: 0 0 0 1px rgba(95, 230, 201, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 18px 40px rgba(0, 0, 0, 0.45);
+  .panel-glow {
+    box-shadow: 0 0 0 1px rgba(95, 230, 201, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 18px 40px rgba(0, 0, 0, 0.45);
+  }
 }
 
 .label {

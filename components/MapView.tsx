@@ -30,6 +30,20 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
   return null;
 }
 
+// Panel oko karte je sada ručno promjenjive veličine (vidi .panel u
+// globals.css), pa Leaflet treba eksplicitno obavijestiti o promjeni
+// dimenzija kontejnera — inače ostaju sivi/isječeni tileovi.
+function InvalidateOnResize() {
+  const map = useMap();
+  useEffect(() => {
+    const container = map.getContainer();
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [map]);
+  return null;
+}
+
 export interface MapPoint {
   lat: number;
   lng: number;
@@ -53,7 +67,10 @@ export default function MapView({
     : [43.5081, 16.4402]; // Split, zadana lokacija
 
   return (
-    <div style={{ height }} className="overflow-hidden rounded-xl border border-line">
+    <div
+      style={{ height: "100%", minHeight: height }}
+      className="overflow-hidden rounded-xl border border-line"
+    >
       <MapContainer
         center={center}
         zoom={14}
@@ -78,6 +95,7 @@ export default function MapView({
           </Marker>
         )}
         {follow && position && <Recenter lat={position.lat} lng={position.lng} />}
+        <InvalidateOnResize />
       </MapContainer>
     </div>
   );
