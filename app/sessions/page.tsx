@@ -18,9 +18,9 @@ function StatCard({ label, value, sub, accent = false }: { label: string; value:
   );
 }
 
-export default function SessionsPage() {
-  const sessions = listSessions(200);
-  const stats = sessionStats();
+export default async function SessionsPage() {
+  const sessions = await listSessions(200);
+  const stats = await sessionStats();
   const t = getServerT();
   const s = t.sessions;
 

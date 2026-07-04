@@ -6,8 +6,6 @@ export const runtime = "nodejs";
 
 // Trenutno stanje + posljednjih N mjerenja (za inicijalno punjenje grafa).
 export async function GET() {
-  return NextResponse.json({
-    snapshot: currentSnapshot(),
-    recent: recentMeasurements(240),
-  });
+  const [snapshot, recent] = await Promise.all([currentSnapshot(), recentMeasurements(240)]);
+  return NextResponse.json({ snapshot, recent });
 }

@@ -1,125 +1,106 @@
-import fs from "node:fs";
-import path from "node:path";
-import type { AlarmEvent, AlarmLevel, Measurement, Session } from "@/lib/types";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 /*
- * Lagana, pure-JS perzistencija (JSON datoteka). Bez nativnih ovisnosti, pa
- * radi svuda gdje radi Node. Za veće količine podataka ili produkciju preporuča
- * se zamjena SQLite-om (npr. better-sqlite3) ili pravom bazom — vidi README.
+ * Perzistencija u Neon Postgres (Vercel Marketplace integracija). Serverless
+ * funkcije su bez stanja (svaki poziv može završiti na drugoj instanci, bez
+ * zajedničke memorije ili diska), pa sve što treba preživjeti između poziva
+ * mora biti u bazi.
  */
 
-export interface DeviceState {
-  deviceOn: boolean;
-  openSessionId: number | null;
-  /** ms epoch kada je RPM pao ispod praga; null ako motor radi ili je sesija već zatvorena. */
-  engineStoppingAt: number | null;
-  updatedAt: number;
-}
+let client: NeonQueryFunction<false, true> | null = null;
 
-interface DataShape {
-  seq: { session: number; measurement: number; alarmEvent: number };
-  device: DeviceState;
-  sessions: Session[];
-  measurements: Measurement[];
-  alarmEvents: AlarmEvent[];
-}
-
-const DB_PATH =
-  process.env.DATABASE_PATH || path.join(process.cwd(), "data", "marine.json");
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __marineData: DataShape | undefined;
-  // eslint-disable-next-line no-var
-  var __marineDirty: boolean | undefined;
-  // eslint-disable-next-line no-var
-  var __marineFlusher: NodeJS.Timeout | undefined;
-  // eslint-disable-next-line no-var
-  var __marineAlarmState: Record<string, AlarmLevel> | undefined;
-}
-
-function load(): DataShape {
-  try {
-    const raw = fs.readFileSync(DB_PATH, "utf8");
-    const parsed = JSON.parse(raw) as DataShape;
-    if (parsed && parsed.seq && parsed.device) {
-      // Backwards compat: dodaj polja uvedena u novijim verzijama
-      if (!parsed.alarmEvents) parsed.alarmEvents = [];
-      if (!parsed.seq.alarmEvent) parsed.seq.alarmEvent = 0;
-      if (parsed.device.engineStoppingAt === undefined)
-        parsed.device.engineStoppingAt = null;
-      return parsed;
+function getClient(): NeonQueryFunction<false, true> {
+  if (!client) {
+    const connectionString = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error("Nedostaje POSTGRES_URL (ili DATABASE_URL) varijabla okruženja.");
     }
-  } catch {
-    /* nema datoteke ili je neispravna → kreni od nule */
+    // Neon-ov HTTP driver interno koristi fetch(); bez ovoga Next.js bi ga
+    // po defaultu keširao (Data Cache) pa bi API rute vraćale zastarjele
+    // podatke unatoč `dynamic = "force-dynamic"`.
+    client = neon(connectionString, { fullResults: true, fetchOptions: { cache: "no-store" } });
   }
-  return {
-    seq: { session: 0, measurement: 0, alarmEvent: 0 },
-    device: { deviceOn: false, openSessionId: null, engineStoppingAt: null, updatedAt: 0 },
-    sessions: [],
-    measurements: [],
-    alarmEvents: [],
-  };
+  return client;
 }
 
-export const data: DataShape = global.__marineData ?? load();
-global.__marineData = data;
-
-export function markDirty() {
-  global.__marineDirty = true;
+// Lijeni omotač oko neon() — spaja se tek pri prvom upitu, ne pri importu
+// modula (npr. tijekom `next build`, kad varijabla okruženja možda još nije
+// dostupna).
+export function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  return getClient()(strings, ...values);
 }
 
-function flush() {
-  if (!global.__marineDirty) return;
-  global.__marineDirty = false;
-  try {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const tmp = DB_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(data));
-    fs.renameSync(tmp, DB_PATH); // atomičan zapis
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error("greška pri zapisu baze:", e);
+let schemaReady: Promise<void> | null = null;
+
+async function createSchema(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS device_state (
+      id SMALLINT PRIMARY KEY DEFAULT 1,
+      device_on BOOLEAN NOT NULL DEFAULT false,
+      open_session_id INTEGER,
+      engine_stopping_at BIGINT,
+      updated_at BIGINT NOT NULL DEFAULT 0,
+      alarm_rpm TEXT NOT NULL DEFAULT 'OK',
+      alarm_coolant_temp TEXT NOT NULL DEFAULT 'OK',
+      alarm_oil_pressure TEXT NOT NULL DEFAULT 'OK',
+      CHECK (id = 1)
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      started_at BIGINT NOT NULL,
+      ended_at BIGINT,
+      duration_sec INTEGER,
+      samples INTEGER NOT NULL DEFAULT 0,
+      max_rpm INTEGER,
+      avg_rpm INTEGER,
+      max_temp REAL,
+      min_oil_pressure REAL,
+      start_lat DOUBLE PRECISION,
+      start_lng DOUBLE PRECISION,
+      end_lat DOUBLE PRECISION,
+      end_lng DOUBLE PRECISION
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS measurements (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+      ts BIGINT NOT NULL,
+      rpm REAL NOT NULL,
+      coolant_temp REAL NOT NULL,
+      oil_pressure REAL NOT NULL,
+      lat DOUBLE PRECISION,
+      lng DOUBLE PRECISION
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_measurements_session ON measurements(session_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_measurements_ts ON measurements(ts)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS alarm_events (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+      ts BIGINT NOT NULL,
+      parameter TEXT NOT NULL,
+      from_level TEXT NOT NULL,
+      to_level TEXT NOT NULL,
+      value REAL NOT NULL
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_alarm_events_session ON alarm_events(session_id)`;
+  await sql`INSERT INTO device_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING`;
+}
+
+// Memoizirano po hladnom startu funkcije; ako prvi pokušaj ne uspije, sljedeći
+// poziv će pokušati ponovno umjesto da zauvijek vrati odbijeni promise.
+export function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((err) => {
+      schemaReady = null;
+      throw err;
+    });
   }
-}
-
-// Periodični flush (najviše jednom u sekundi) + zapis pri izlasku.
-if (!global.__marineFlusher) {
-  global.__marineFlusher = setInterval(flush, 1000);
-  const onExit = () => {
-    flush();
-    process.exit();
-  };
-  process.on("SIGINT", onExit);
-  process.on("SIGTERM", onExit);
-  process.on("beforeExit", flush);
-}
-
-export function nextId(kind: "session" | "measurement" | "alarmEvent"): number {
-  data.seq[kind] += 1;
-  return data.seq[kind];
-}
-
-export function getAlarmState(): Record<string, AlarmLevel> {
-  if (!global.__marineAlarmState) {
-    global.__marineAlarmState = {
-      rpm: "OK",
-      coolantTemp: "OK",
-      oilPressure: "OK",
-    };
-  }
-  return global.__marineAlarmState;
-}
-
-export function resetAlarmState(): void {
-  global.__marineAlarmState = {
-    rpm: "OK",
-    coolantTemp: "OK",
-    oilPressure: "OK",
-  };
-}
-
-export function recentAlarmEvents(limit = 50): AlarmEvent[] {
-  const all = data.alarmEvents;
-  return all.slice(Math.max(0, all.length - limit)).reverse();
+  return schemaReady;
 }

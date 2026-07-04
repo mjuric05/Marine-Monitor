@@ -26,6 +26,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const snap = ingest(body);
+  const snap = await ingest(body);
   return NextResponse.json({ ok: true, snapshot: snap });
 }

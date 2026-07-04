@@ -13,7 +13,7 @@ export async function GET(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const session = getSession(id);
+  const session = await getSession(id);
   if (!session) {
     return new Response("Not Found", { status: 404 });
   }

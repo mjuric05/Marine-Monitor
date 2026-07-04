@@ -9,9 +9,9 @@ import DeleteSessionButton from "@/components/DeleteSessionButton";
 
 export const dynamic = "force-dynamic";
 
-export default function SessionDetail({ params }: { params: { id: string } }) {
+export default async function SessionDetail({ params }: { params: { id: string } }) {
   const id = Number(params.id);
-  const session = Number.isFinite(id) ? getSession(id) : null;
+  const session = Number.isFinite(id) ? await getSession(id) : null;
   if (!session) notFound();
 
   const t = getServerT();

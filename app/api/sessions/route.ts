@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json({ sessions: listSessions(200) });
+  return NextResponse.json({ sessions: await listSessions(200) });
 }

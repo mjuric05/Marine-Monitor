@@ -20,6 +20,8 @@ export interface Trends {
 
 const MAX_POINTS = 240;
 const TREND_WINDOW = 8;
+const LATEST_POLL_MS = 1200;
+const ALARMS_POLL_MS = 4000;
 
 function getTrend(
   points: LivePoint[],
@@ -41,118 +43,61 @@ function getTrend(
   return "stable";
 }
 
+// Nadzorna ploča na Vercelu (serverless) ne može držati otvorenu SSE vezu
+// pošurenu iz procesa poslužitelja, pa umjesto push obavijesti koristimo
+// periodičko dohvaćanje (/api/latest za stanje+graf, /api/alarms za log).
 export function useLiveData() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [history, setHistory] = useState<LivePoint[]>([]);
   const [alarmEvents, setAlarmEvents] = useState<AlarmEvent[]>([]);
   const [connected, setConnected] = useState(false);
 
-  const retryCountRef = useRef(0);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const esRef = useRef<EventSource | null>(null);
   const mountedRef = useRef(true);
 
-  // Inicijalno punjenje podataka iz baze.
   useEffect(() => {
     mountedRef.current = true;
-    let active = true;
 
-    fetch("/api/latest")
-      .then((r) => r.json())
-      .then((d: { snapshot: Snapshot; recent: Measurement[] }) => {
-        if (!active) return;
+    async function pollLatest() {
+      try {
+        const r = await fetch("/api/latest", { cache: "no-store" });
+        if (!r.ok) throw new Error("bad status");
+        const d: { snapshot: Snapshot; recent: Measurement[] } = await r.json();
+        if (!mountedRef.current) return;
+        setConnected(true);
         setSnapshot(d.snapshot);
         setHistory(
-          d.recent.map((m) => ({
+          d.recent.slice(-MAX_POINTS).map((m) => ({
             ts: m.ts,
             rpm: m.rpm,
             coolantTemp: m.coolantTemp,
             oilPressure: m.oilPressure,
           }))
         );
-      })
-      .catch(() => {});
-
-    fetch("/api/alarms")
-      .then((r) => r.json())
-      .then((d: { events: AlarmEvent[] }) => {
-        if (!active) return;
-        setAlarmEvents(d.events);
-      })
-      .catch(() => {});
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // SSE pretplata s eksponencijalnim ponovnim spajanjem.
-  useEffect(() => {
-    function connect() {
-      if (!mountedRef.current) return;
-
-      const es = new EventSource("/api/stream");
-      esRef.current = es;
-
-      es.onopen = () => {
-        if (!mountedRef.current) return;
-        setConnected(true);
-        retryCountRef.current = 0;
-      };
-
-      es.onerror = () => {
-        if (!mountedRef.current) return;
-        setConnected(false);
-        es.close();
-        esRef.current = null;
-        const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30_000);
-        retryCountRef.current = Math.min(retryCountRef.current + 1, 6);
-        retryTimerRef.current = setTimeout(connect, delay);
-      };
-
-      es.onmessage = (ev) => {
-        if (!mountedRef.current) return;
-        try {
-          const snap: Snapshot = JSON.parse(ev.data);
-          setSnapshot(snap);
-
-          // Dodaj nove alarm događaje u log (newest-first).
-          if (snap.recentAlarms && snap.recentAlarms.length > 0) {
-            setAlarmEvents((prev) => {
-              const ids = new Set(prev.map((e) => e.id));
-              const fresh = snap.recentAlarms!.filter((e) => !ids.has(e.id));
-              if (!fresh.length) return prev;
-              return [...fresh, ...prev].slice(0, 50);
-            });
-          }
-
-          if (snap.last) {
-            const p: LivePoint = {
-              ts: snap.last.ts,
-              rpm: snap.last.rpm,
-              coolantTemp: snap.last.coolantTemp,
-              oilPressure: snap.last.oilPressure,
-            };
-            setHistory((h) => {
-              if (h.length && h[h.length - 1].ts === p.ts) return h;
-              const next = [...h, p];
-              return next.length > MAX_POINTS
-                ? next.slice(next.length - MAX_POINTS)
-                : next;
-            });
-          }
-        } catch {
-          /* ignoriraj neispravne poruke */
-        }
-      };
+      } catch {
+        if (mountedRef.current) setConnected(false);
+      }
     }
 
-    connect();
+    async function pollAlarms() {
+      try {
+        const r = await fetch("/api/alarms", { cache: "no-store" });
+        if (!r.ok) return;
+        const d: { events: AlarmEvent[] } = await r.json();
+        if (mountedRef.current) setAlarmEvents(d.events);
+      } catch {
+        /* pokušat ćemo opet sljedeći ciklus */
+      }
+    }
+
+    pollLatest();
+    pollAlarms();
+    const latestTimer = setInterval(pollLatest, LATEST_POLL_MS);
+    const alarmsTimer = setInterval(pollAlarms, ALARMS_POLL_MS);
 
     return () => {
       mountedRef.current = false;
-      esRef.current?.close();
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      clearInterval(latestTimer);
+      clearInterval(alarmsTimer);
     };
   }, []);
 

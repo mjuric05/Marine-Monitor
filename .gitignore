@@ -8,3 +8,6 @@ tsconfig.tsbuildinfo
 .env
 .DS_Store
 *.log
+
+.vercel
+.env*

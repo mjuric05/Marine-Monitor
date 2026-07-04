@@ -12,7 +12,7 @@ export async function GET(
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "Neispravan id" }, { status: 400 });
   }
-  const session = getSession(id);
+  const session = await getSession(id);
   if (!session) {
     return NextResponse.json({ error: "Sesija nije pronađena" }, { status: 404 });
   }
@@ -34,7 +34,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Neispravan JSON" }, { status: 400 });
   }
   const name = typeof body.name === "string" ? body.name : null;
-  const ok = updateSessionName(id, name);
+  const ok = await updateSessionName(id, name);
   if (!ok) {
     return NextResponse.json({ error: "Sesija nije pronađena" }, { status: 404 });
   }
@@ -49,7 +49,7 @@ export async function DELETE(
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "Neispravan id" }, { status: 400 });
   }
-  const ok = deleteSession(id);
+  const ok = await deleteSession(id);
   if (!ok) {
     return NextResponse.json({ error: "Sesija nije pronađena" }, { status: 404 });
   }

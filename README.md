@@ -21,8 +21,9 @@ brodskog motora temeljenom na protokolu **SAE J1939 / CAN**.
 - **Krivulje i putanja** — detalj svake sesije prikazuje krivulje sva tri
   parametra kroz vrijeme te GPS putanju na karti.
 - **Lokacija** — posljednja poznata GPS pozicija uređaja dok je upaljen.
-- **Stvarni promet** — podatci stižu na `POST /api/ingest`, a pregledniku se
-  guraju kroz **Server-Sent Events** (`/api/stream`).
+- **Stvarni promet** — podatci stižu na `POST /api/ingest`, a preglednik ih
+  dohvaća periodičkim dohvaćanjem (`/api/latest`, `/api/alarms`) — pogodno za
+  rad na serverless okruženju (Vercel).
 - **Simulator** — ugrađeni generator realističnog J1939 prometa za rad bez
   stvarnog motora.
 
@@ -37,14 +38,14 @@ brodskog motora temeljenom na protokolu **SAE J1939 / CAN**.
 | Grafovi         | Recharts                                      |
 | Karta           | React-Leaflet + OpenStreetMap (CARTO dark)    |
 | Backend         | Next.js Route Handlers (Node.js runtime)      |
-| Stvarno vrijeme | Server-Sent Events (SSE)                      |
-| Pohrana         | JSON datoteka (bez nativnih ovisnosti)        |
+| Stvarno vrijeme | Periodičko dohvaćanje (polling)               |
+| Pohrana         | Vercel Postgres (`@vercel/postgres`)          |
 
-> **Napomena o bazi:** radi jednostavnog pokretanja (bez prevođenja nativnih
-> modula) perzistencija koristi laganu JSON datoteku u `data/`. Za produkciju ili
-> veće količine podataka preporuča se zamjena SQLite-om (npr. `better-sqlite3`)
-> ili pravom bazom — vidi `lib/db.ts` i `lib/sessions.ts`; sučelje (funkcije
-> `ingest`, `listSessions`, `getSession`, …) ostaje isto.
+> **Napomena o bazi:** aplikacija je izvorno koristila JSON datoteku i
+> Server-Sent Events, što zahtijeva stalno pokrenut Node proces (npr. na
+> Raspberry Piju ili VPS-u). Za rad na Vercelu (serverless, bez trajnog
+> diska/memorije/pozadinskih timera) pohrana je prebačena na Postgres, a
+> ažuriranje uživo na polling — vidi `lib/db.ts` i `lib/sessions.ts`.
 
 ---
 
@@ -117,8 +118,8 @@ INGEST_URL=http://<ip-poslužitelja>:3000/api/ingest node simulator/simulate.js
 | Metoda i putanja            | Opis                                          |
 |-----------------------------|-----------------------------------------------|
 | `POST /api/ingest`          | Prima jedno mjerenje (uređaj/simulator).      |
-| `GET  /api/stream`          | SSE tok najnovijih snapshotova uživo.         |
-| `GET  /api/latest`          | Trenutno stanje + posljednjih 240 mjerenja.   |
+| `GET  /api/latest`          | Trenutno stanje + posljednjih 240 mjerenja (poll ~1.2 s). |
+| `GET  /api/alarms`          | Zadnjih 50 alarm događaja (poll ~4 s).        |
 | `GET  /api/sessions`        | Popis sesija s agregatima.                    |
 | `GET  /api/sessions/:id`    | Detalj sesije s mjerenjima.                    |
 
@@ -131,13 +132,12 @@ app/
   page.tsx                 # nadzorna ploča (uživo)
   sessions/page.tsx        # popis sesija
   sessions/[id]/page.tsx   # detalj sesije (krivulje + putanja)
-  api/                     # ingest, stream (SSE), latest, sessions
+  api/                     # ingest, latest, alarms, sessions
 components/                # Gauge, Dashboard, LiveCharts, MapView, StatusBar, …
-hooks/useLiveData.ts       # SSE pretplata + povijest mjerenja
-lib/                       # db (JSON store), sessions (logika), bus (SSE), tipovi
+hooks/useLiveData.ts       # polling + povijest mjerenja
+lib/                       # db (Postgres veza + shema), sessions (logika), tipovi
 config/thresholds.ts       # pragovi parametara i skale instrumenata
 simulator/simulate.js      # generator J1939 prometa
-data/                      # JSON pohrana (stvara se pri prvom pokretanju)
 ```
 
 ---
@@ -152,7 +152,25 @@ Pragovi upozorenja/alarma i skale instrumenata definirani su na jednom mjestu u
 
 ## Ograničenja
 
-- SSE i pub/sub rade unutar jednog procesa poslužitelja. Za više instanci koristi
-  se vanjski broker (npr. Redis pub/sub).
-- JSON pohrana je namijenjena prototipu; za dugotrajan rad uvedi bazu i strategiju
-  zadržavanja (sažimanje starih podataka).
+- Nema push obavijesti — preglednik dohvaća stanje pollingom (~1.2 s za
+  mjerenja, ~4 s za alarme), pa postoji kašnjenje tog reda veličine.
+- "Watchdog" koji zatvara sesiju kad uređaj prestane slati podatke izvodi se
+  lijeno, pri sljedećem zahtjevu (npr. dok je nadzorna ploča otvorena i
+  pollinga), a ne unutar 1 s kao kod stalno pokrenutog procesa — vidi
+  `tickWatchdog` u `lib/sessions.ts`.
+- Nema strategije zadržavanja/sažimanja starih mjerenja; za dugotrajan rad
+  razmisli o periodičkom brisanju/agregaciji starijih podataka.
+
+---
+
+## Deploy na Vercel
+
+1. Repozitorij mora biti na GitHubu (ili GitLab/Bitbucket).
+2. Na [vercel.com](https://vercel.com) → **Add New → Project** → uvezi
+   repozitorij. Next.js se prepoznaje automatski.
+3. **Storage → Create Database → Postgres** (Neon) i poveži ga s projektom —
+   ovo automatski postavlja `POSTGRES_URL` u varijable okruženja.
+4. **Deploy**. Tablice se same kreiraju pri prvom zahtjevu (`ensureSchema()` u
+   `lib/db.ts`).
+5. Uređaj/simulator neka šalje podatke na `https://<projekt>.vercel.app/api/ingest`
+   (postavi `INGEST_URL`).
