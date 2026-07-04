@@ -1,0 +1,10 @@
+node_modules
+.next
+out
+data/*.json
+data/*.json-*
+.vercel
+tsconfig.tsbuildinfo
+.env
+.DS_Store
+*.log
