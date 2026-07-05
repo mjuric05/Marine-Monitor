@@ -51,12 +51,15 @@ body {
     background: linear-gradient(180deg, var(--panel), var(--panel2));
     border: 1px solid var(--line);
     border-radius: 14px;
-    /* Svaki panel je ručno promjenjive veličine (drag za donji desni kut);
+    /* Svaki panel je ručno promjenjive visine (drag za donji desni kut).
+     * Samo vertikalno: paneli u istom grid retku (npr. 3 gaugea) dijele
+     * redak čija visina raste s najvišim elementom, pa susjedi automatski
+     * "naprave mjesta" bez preklapanja. Vodoravni resize bi to razbio, jer
+     * grid stupci imaju fiksni razmjer (1fr) koji se ne širi s njima.
      * @layer components osigurava da specifični overflow-hidden (npr. na
      * tablici sesija) i dalje pobjeđuje preko Tailwind utility klasa. */
-    resize: both;
+    resize: vertical;
     overflow: auto;
-    min-width: 180px;
     min-height: 96px;
   }
 

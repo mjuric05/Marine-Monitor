@@ -104,19 +104,19 @@ export default function Dashboard() {
         <LiveCharts data={history} thresholds={thresholds} />
       </section>
 
-      {/* Donji red */}
-      <section className="grid gap-4 lg:grid-cols-3">
-        {/* Karta */}
-        <div className="panel panel-glow p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="label">{d.location}</h2>
-            <span className="readout text-xs text-dim">
-              {fmtCoord(pos?.lat ?? null, pos?.lng ?? null)}
-            </span>
+      {/* Donji red — karta se prikazuje samo dok uređaj šalje lokaciju. */}
+      <section className={`grid gap-4 ${pos ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
+        {pos && (
+          <div className="panel panel-glow p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="label">{d.location}</h2>
+              <span className="readout text-xs text-dim">
+                {fmtCoord(pos.lat, pos.lng)}
+              </span>
+            </div>
+            <MapView position={pos} follow height={250} />
           </div>
-          <MapView position={pos} follow height={250} />
-          {!pos && <p className="mt-3 text-sm text-dim">{d.noLocation}</p>}
-        </div>
+        )}
 
         {/* Odčitaj + zdravlje */}
         <div className="panel panel-glow p-5">

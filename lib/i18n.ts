@@ -48,7 +48,6 @@ export const translations = {
     dashboard: {
       liveCharts: "Kretanje parametara u stvarnom vremenu",
       location: "Lokacija uređaja",
-      noLocation: "Nema podataka o lokaciji. Uređaj šalje GPS koordinate kada su dostupne.",
       readout: "Trenutni odčitaj",
       sessionsLink: "Sve sesije →",
       sessionNote: "Sesija se automatski bilježi kada motor proradi.",
@@ -182,7 +181,6 @@ export const translations = {
     dashboard: {
       liveCharts: "Live parameter trends",
       location: "Device location",
-      noLocation: "No location data. The device sends GPS coordinates when available.",
       readout: "Current readout",
       sessionsLink: "All sessions →",
       sessionNote: "Session is automatically recorded when the engine starts.",
