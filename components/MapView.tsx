@@ -68,7 +68,7 @@ export default function MapView({
 
   return (
     <div
-      style={{ height: "100%", minHeight: height }}
+      style={{ height }}
       className="overflow-hidden rounded-xl border border-line"
     >
       <MapContainer
