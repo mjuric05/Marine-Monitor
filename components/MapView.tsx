@@ -30,16 +30,25 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
   return null;
 }
 
-// Panel oko karte je sada ručno promjenjive veličine (vidi .panel u
-// globals.css), pa Leaflet treba eksplicitno obavijestiti o promjeni
-// dimenzija kontejnera — inače ostaju sivi/isječeni tileovi.
+// Leaflet izmjeri kontejner samo jednom, pri inicijalizaciji. Budući da se
+// MapView učitava lijeno (next/dynamic), taj trenutak katkad prethodi
+// konačnom rasporedu stranice, pa karta ostane pogrešno/sivo iscrtana dok
+// se nešto (npr. ručni resize prozora) ne dogodi. Zato eksplicitno
+// zatražimo ponovno mjerenje odmah nakon montiranja (i mijenjamo je i dalje
+// pratimo — panel oko karte je ručno promjenjive veličine, vidi .panel u
+// globals.css).
 function InvalidateOnResize() {
   const map = useMap();
   useEffect(() => {
+    map.invalidateSize();
+    const raf = requestAnimationFrame(() => map.invalidateSize());
     const container = map.getContainer();
     const ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [map]);
   return null;
 }
